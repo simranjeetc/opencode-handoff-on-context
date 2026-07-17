@@ -1,0 +1,31 @@
+{
+  "name": "opencode-handoff-on-context",
+  "version": "0.1.0",
+  "description": "Auto hand-off OpenCode sessions in Herdr before the context window fills. Splits the current pane, launches a fresh OpenCode with a handoff file, and closes the old pane.",
+  "type": "module",
+  "main": "index.js",
+  "exports": "./index.js",
+  "files": [
+    "index.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "herdr",
+    "handoff",
+    "context-window",
+    "compaction"
+  ],
+  "author": "simranjeetc",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/simranjeetc/opencode-handoff-on-context.git"
+  },
+  "bugs": {
+    "url": "https://github.com/simranjeetc/opencode-handoff-on-context/issues"
+  },
+  "homepage": "https://github.com/simranjeetc/opencode-handoff-on-context#readme"
+}
