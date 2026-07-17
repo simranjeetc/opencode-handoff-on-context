@@ -5,6 +5,10 @@ import { appendFileSync, mkdirSync, writeFileSync, rmSync, readdirSync, statSync
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
+// Filesystem operations bundled so I/O-heavy functions can be exercised with a
+// fake in tests (seam testing) without touching the real disk.
+const defaultFs = { mkdirSync, writeFileSync, rmSync, readdirSync, statSync };
+
 // ---------------------------------------------------------------------------
 // Logging
 // ---------------------------------------------------------------------------
@@ -109,12 +113,12 @@ const HANDOFF_DIR_SEGMENT = ".opencode-handoff";
 //     auto-ness propagates deterministically across the handoff chain without
 //     re-inferring at every hop.
 //  2. Fallback: inspect our own argv for a literal --auto flag.
-function selfLaunchedWithAuto() {
-  if (process.env.OPENCODE_HANDOFF_IS_AUTO === "1") {
+export function selfLaunchedWithAuto(env = process.env, argv = process.argv) {
+  if (env?.OPENCODE_HANDOFF_IS_AUTO === "1") {
     return true;
   }
-  const argv = Array.isArray(process.argv) ? process.argv : [];
-  return argv.includes("--auto");
+  const args = Array.isArray(argv) ? argv : [];
+  return args.includes("--auto");
 }
 
 // Resolve whether the NEXT session should launch with `--auto`, in priority
@@ -123,18 +127,21 @@ function selfLaunchedWithAuto() {
 //      "0"/"false" => off). Deterministic, beats all heuristics.
 //   2. This process was itself launched with --auto => stay auto (sticky chain).
 //   3. Timing inference from observed permission replies (legacy best-effort).
-function resolveAuto(sessionID) {
-  const override = (process.env.OPENCODE_HANDOFF_AUTO || "").trim().toLowerCase();
+export function resolveAuto(sessionID, deps = {}) {
+  const env = deps.env ?? process.env;
+  const argv = deps.argv ?? process.argv;
+  const autoSet = deps.autoSessions ?? autoSessions;
+  const override = (env?.OPENCODE_HANDOFF_AUTO || "").trim().toLowerCase();
   if (override === "1" || override === "true" || override === "yes" || override === "on") {
     return { auto: true, source: "env-override" };
   }
   if (override === "0" || override === "false" || override === "no" || override === "off") {
     return { auto: false, source: "env-override" };
   }
-  if (selfLaunchedWithAuto()) {
+  if (selfLaunchedWithAuto(env, argv)) {
     return { auto: true, source: "sticky-self" };
   }
-  return { auto: autoSessions.has(sessionID), source: "inference" };
+  return { auto: autoSet.has(sessionID), source: "inference" };
 }
 
 // True if a permission's payload references a handoff file/dir. Serializing the
@@ -142,7 +149,7 @@ function resolveAuto(sessionID) {
 // puts the concrete path/command in tool-specific metadata whose exact keys
 // vary across versions. The .opencode-handoff/ segment appears both in the read
 // target and in the `rm` command string, so a substring test is robust.
-function permissionTouchesHandoff(permission) {
+export function permissionTouchesHandoff(permission) {
   try {
     return JSON.stringify(permission ?? {}).includes(HANDOFF_DIR_SEGMENT);
   } catch {
@@ -170,7 +177,7 @@ function getMessageInfo(properties) {
   return info && typeof info === "object" ? info : undefined;
 }
 
-function getTokenCount(info) {
+export function getTokenCount(info) {
   const t = info?.tokens;
   if (!t || typeof t !== "object") {
     return 0;
@@ -270,7 +277,7 @@ function isRootSessionEvent(event) {
   }
 }
 
-function textFromMessages(messages) {
+export function textFromMessages(messages) {
   const chunks = [];
   for (const message of messages ?? []) {
     const role = message?.info?.role ?? "unknown";
@@ -291,7 +298,7 @@ function unwrapData(result) {
   return result?.data ?? result?.response?.data ?? result;
 }
 
-function truncateMiddle(text, maxLength) {
+export function truncateMiddle(text, maxLength) {
   if (text.length <= maxLength) {
     return text;
   }
@@ -318,7 +325,7 @@ async function getSessionText(client, sessionID, directory) {
   return textFromMessages(unwrapData(result));
 }
 
-function buildHandoffPrompt({ sessionID, directory, tokenCount, sessionText }) {
+export function buildHandoffPrompt({ sessionID, directory, tokenCount, sessionText }) {
   const body = truncateMiddle(
     sessionText || "No readable session text was returned by OpenCode.",
     numberFromEnv("OPENCODE_HANDOFF_PROMPT_LIMIT", DEFAULT_PROMPT_LIMIT),
@@ -348,7 +355,7 @@ ${body}`;
 // POSIX-safe single-quote shell quoting: wrap in single quotes and escape any
 // embedded single quote as '\''. Used to build the opencode command line that
 // `herdr pane run` executes via the shell.
-function shellQuote(value) {
+export function shellQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
@@ -360,13 +367,13 @@ function shellQuote(value) {
 // rather than the OS temp dir: OpenCode gates reads of files outside the
 // working directory behind a permission prompt, which would stall a non-auto
 // handoff. Keeping it in-tree means the new session can read it with no prompt.
-function writeHandoffFile(directory, sessionID, body) {
+function writeHandoffFile(directory, sessionID, body, fs = defaultFs) {
   const dir = join(directory, ".opencode-handoff");
-  mkdirSync(dir, { recursive: true });
-  sweepStaleHandoffFiles(dir);
+  fs.mkdirSync(dir, { recursive: true });
+  sweepStaleHandoffFiles(dir, fs);
   const safeID = String(sessionID || "session").replace(/[^A-Za-z0-9_-]/g, "_");
   const path = join(dir, `handoff-${safeID}-${Date.now()}.md`);
-  writeFileSync(path, body, { mode: 0o600 });
+  fs.writeFileSync(path, body, { mode: 0o600 });
   log.info("wrote handoff file", { path, bytes: Buffer.byteLength(body) });
   return path;
 }
@@ -375,16 +382,16 @@ function writeHandoffFile(directory, sessionID, body) {
 // its own file, but that is not guaranteed, and the process that created the
 // file is torn down right after handoff (so an in-process timer is unreliable).
 // Instead we sweep leftovers older than a TTL on each new handoff. Never throws.
-function sweepStaleHandoffFiles(dir) {
+function sweepStaleHandoffFiles(dir, fs = defaultFs) {
   const ttlMs = numberFromEnv("OPENCODE_HANDOFF_FILE_TTL_MS", 60 * 60 * 1000);
   try {
     const now = Date.now();
-    for (const name of readdirSync(dir)) {
+    for (const name of fs.readdirSync(dir)) {
       if (!name.startsWith("handoff-")) continue;
       const full = join(dir, name);
       try {
-        if (now - statSync(full).mtimeMs > ttlMs) {
-          rmSync(full, { force: true });
+        if (now - fs.statSync(full).mtimeMs > ttlMs) {
+          fs.rmSync(full, { force: true });
           log.debug("swept stale handoff file", { path: full });
         }
       } catch {
@@ -405,16 +412,16 @@ function sweepStaleHandoffFiles(dir) {
 // The handoff body is written to an in-tree file and the new OpenCode is
 // launched with a tiny `opencode --prompt "<pointer>"` that instructs it to
 // read that file. No TUI typing, no send-text chunking, no readiness-then-type.
-async function startHandoff({ $, directory, sessionID, prompt, model, auto }) {
-  const oldPaneID = process.env.HERDR_PANE_ID;
+export async function startHandoff({ $, directory, sessionID, prompt, model, auto, env = process.env, fs = defaultFs }) {
+  const oldPaneID = env.HERDR_PANE_ID;
   if (!oldPaneID) {
     throw new Error("HERDR_PANE_ID is not set; cannot split the current pane for handoff");
   }
 
-  const handoffFile = writeHandoffFile(directory, sessionID, prompt);
+  const handoffFile = writeHandoffFile(directory, sessionID, prompt, fs);
 
-  const direction = process.env.OPENCODE_HANDOFF_SPLIT_DIRECTION || "down";
-  const ratio = process.env.OPENCODE_HANDOFF_SPLIT_RATIO || "0.5";
+  const direction = env.OPENCODE_HANDOFF_SPLIT_DIRECTION || "down";
+  const ratio = env.OPENCODE_HANDOFF_SPLIT_RATIO || "0.5";
   log.info("splitting current pane for handoff", { oldPaneID, direction, ratio, directory });
 
   const split = await $`herdr pane split ${oldPaneID} --direction ${direction} --ratio ${ratio} --cwd ${directory} --focus`.json();
@@ -424,7 +431,7 @@ async function startHandoff({ $, directory, sessionID, prompt, model, auto }) {
   }
   log.info("new pane created", { oldPaneID, newPaneID });
 
-  const command = process.env.OPENCODE_HANDOFF_COMMAND || "opencode";
+  const command = env.OPENCODE_HANDOFF_COMMAND || "opencode";
   // Tiny pointer prompt: the new session reads the temp file for full context.
   const pointer =
     `Automatic context handoff. Read the file ${handoffFile} — it is your`

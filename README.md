@@ -77,6 +77,16 @@ For overnight or looped runs the plugin guarantees the handoff never stalls on a
 - A `permission.ask` hook **auto-approves any permission that touches `.opencode-handoff/`** (the handoff file read and its follow-up delete). This is scoped strictly to handoff paths and never broadens approval for ordinary task commands. It fixes the failure where a session launched without `--auto` blocks forever on deleting the handoff file.
 - `--auto` propagation is **deterministic and sticky**, resolved in priority order: `OPENCODE_HANDOFF_AUTO` env override → this process was itself launched with `--auto` (a marker env `OPENCODE_HANDOFF_IS_AUTO=1` is stamped into each auto child, so auto-ness survives every hop) → legacy permission-timing inference. This avoids the old bug where a session that never hit a permission prompt was misdetected as non-auto, dropping `--auto` for the rest of the chain.
 
+## Development
+
+Tests use Node's built-in runner (`node --test`) — zero dependencies. They import the shipped `index.js` directly, so a behavior drift fails a test.
+
+```sh
+npm test
+```
+
+Coverage is risk-based: the unattended-safety decision logic (`resolveAuto`, `permissionTouchesHandoff`), the pure prompt/quoting/token helpers, and the `startHandoff` orchestration seam (exercised with an injected fake shell `$` and fake `fs`, so no real Herdr or disk is needed). CI runs the suite on Node 20 and 22 for every push and PR.
+
 ## License
 
 MIT
