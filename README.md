@@ -54,7 +54,8 @@ All configuration is via environment variables.
 | --- | --- | --- |
 | `OPENCODE_HANDOFF_THRESHOLD` | `100000` | Total context tokens that trigger a handoff. |
 | `OPENCODE_HANDOFF_PROMPT_LIMIT` | `200000` | Max chars of session text kept in the handoff file (middle-truncated). |
-| `OPENCODE_HANDOFF_AUTO_REPLY_MS` | `1500` | Permission replies faster than this infer the old session ran with `--auto`. |
+| `OPENCODE_HANDOFF_AUTO` | _(unset)_ | Force the next session's `--auto` state. `1`/`true`/`yes`/`on` => always launch with `--auto`; `0`/`false`/`no`/`off` => never. Beats all heuristics. Leave unset to use sticky/inferred auto. |
+| `OPENCODE_HANDOFF_AUTO_REPLY_MS` | `1500` | Permission replies faster than this infer the old session ran with `--auto` (last-resort fallback only). |
 | `OPENCODE_HANDOFF_SPLIT_DIRECTION` | `down` | Herdr pane split direction. |
 | `OPENCODE_HANDOFF_SPLIT_RATIO` | `0.5` | Herdr pane split ratio. |
 | `OPENCODE_HANDOFF_COMMAND` | `opencode` | Command used to launch the new session. |
@@ -68,6 +69,13 @@ All configuration is via environment variables.
 The plugin also enables OpenCode auto-compaction with a 10k-token reserve via the `config` hook, and captures the current model + reasoning variant so the new session is launched with the same `--model` (and `--auto` when inferred).
 
 The handoff body is written **in-tree** (under the working directory) so the new session can read it without an out-of-tree read permission prompt. The new session is asked to delete the file once read; stale files are swept on each handoff.
+
+### Unattended / chained runs
+
+For overnight or looped runs the plugin guarantees the handoff never stalls on a human:
+
+- A `permission.ask` hook **auto-approves any permission that touches `.opencode-handoff/`** (the handoff file read and its follow-up delete). This is scoped strictly to handoff paths and never broadens approval for ordinary task commands. It fixes the failure where a session launched without `--auto` blocks forever on deleting the handoff file.
+- `--auto` propagation is **deterministic and sticky**, resolved in priority order: `OPENCODE_HANDOFF_AUTO` env override → this process was itself launched with `--auto` (a marker env `OPENCODE_HANDOFF_IS_AUTO=1` is stamped into each auto child, so auto-ness survives every hop) → legacy permission-timing inference. This avoids the old bug where a session that never hit a permission prompt was misdetected as non-auto, dropping `--auto` for the rest of the chain.
 
 ## License
 

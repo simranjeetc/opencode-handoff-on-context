@@ -98,6 +98,58 @@ const permAskTimes = new Map();
 // Sessions inferred to be running with `--auto` (instant permission replies).
 const autoSessions = new Set();
 
+// Marker directory segment for handoff files. Any permission whose payload
+// references this path is part of the handoff machinery (reading the handoff
+// file, or the follow-up delete of it) and must never block on a human — that
+// is exactly what stalls unattended, chained overnight runs.
+const HANDOFF_DIR_SEGMENT = ".opencode-handoff";
+
+// Did THIS OpenCode process launch with `--auto`? Two signals:
+//  1. Our own launcher stamps OPENCODE_HANDOFF_IS_AUTO=1 into the child env, so
+//     auto-ness propagates deterministically across the handoff chain without
+//     re-inferring at every hop.
+//  2. Fallback: inspect our own argv for a literal --auto flag.
+function selfLaunchedWithAuto() {
+  if (process.env.OPENCODE_HANDOFF_IS_AUTO === "1") {
+    return true;
+  }
+  const argv = Array.isArray(process.argv) ? process.argv : [];
+  return argv.includes("--auto");
+}
+
+// Resolve whether the NEXT session should launch with `--auto`, in priority
+// order (first decisive signal wins):
+//   1. OPENCODE_HANDOFF_AUTO env: explicit human override ("1"/"true" => on,
+//      "0"/"false" => off). Deterministic, beats all heuristics.
+//   2. This process was itself launched with --auto => stay auto (sticky chain).
+//   3. Timing inference from observed permission replies (legacy best-effort).
+function resolveAuto(sessionID) {
+  const override = (process.env.OPENCODE_HANDOFF_AUTO || "").trim().toLowerCase();
+  if (override === "1" || override === "true" || override === "yes" || override === "on") {
+    return { auto: true, source: "env-override" };
+  }
+  if (override === "0" || override === "false" || override === "no" || override === "off") {
+    return { auto: false, source: "env-override" };
+  }
+  if (selfLaunchedWithAuto()) {
+    return { auto: true, source: "sticky-self" };
+  }
+  return { auto: autoSessions.has(sessionID), source: "inference" };
+}
+
+// True if a permission's payload references a handoff file/dir. Serializing the
+// whole object is deliberately version-agnostic: OpenCode's Permission shape
+// puts the concrete path/command in tool-specific metadata whose exact keys
+// vary across versions. The .opencode-handoff/ segment appears both in the read
+// target and in the `rm` command string, so a substring test is robust.
+function permissionTouchesHandoff(permission) {
+  try {
+    return JSON.stringify(permission ?? {}).includes(HANDOFF_DIR_SEGMENT);
+  } catch {
+    return false;
+  }
+}
+
 function numberFromEnv(name, fallback) {
   const value = Number(process.env[name]);
   return Number.isFinite(value) && value > 0 ? value : fallback;
@@ -394,7 +446,12 @@ async function startHandoff({ $, directory, sessionID, prompt, model, auto }) {
     parts.push("--auto");
   }
   parts.push("--prompt", pointer);
-  const commandLine = parts.map(shellQuote).join(" ");
+  // Stamp a marker env into the child so the NEXT hop in the handoff chain
+  // knows it is auto deterministically (see selfLaunchedWithAuto), instead of
+  // re-inferring from permission timing — which fails whenever a session never
+  // hits a permission prompt (common in long unattended runs).
+  const envPrefix = auto ? "OPENCODE_HANDOFF_IS_AUTO=1 " : "";
+  const commandLine = envPrefix + parts.map(shellQuote).join(" ");
   log.info("launching opencode in new pane", {
     newPaneID,
     handoffFile,
@@ -456,7 +513,7 @@ async function triggerHandoff({ client, $, directory, sessionID, tokenCount }) {
 
   const prompt = buildHandoffPrompt({ sessionID, directory, tokenCount, sessionText });
   const variant = variantBySession.get(sessionID);
-  const auto = autoSessions.has(sessionID);
+  const { auto, source: autoSource } = resolveAuto(sessionID);
   try {
     const result = await startHandoff({ $, directory, sessionID, prompt, model, auto });
     log.info("handoff completed", {
@@ -465,6 +522,7 @@ async function triggerHandoff({ client, $, directory, sessionID, tokenCount }) {
       model: model ? `${model.providerID}/${model.modelID}` : undefined,
       variant: variant ?? "default",
       auto,
+      autoSource,
       ...result,
     });
   } catch (error) {
@@ -484,6 +542,27 @@ export const HandoffOnContextPlugin = async ({ client, directory, $ }) => {
         auto: true,
         reserved: Math.max(Number(config.compaction?.reserved ?? 0), 10_000),
       };
+    },
+    // Unconditionally auto-approve permissions that belong to the handoff
+    // machinery itself (reading the handoff file, and the follow-up `rm` that
+    // deletes it). Without this, a session launched WITHOUT `--auto` — which
+    // happens whenever the previous session never triggered a permission prompt
+    // and so was not detected as auto — stalls forever on the delete step,
+    // freezing the whole chained/overnight run until a human clicks approve.
+    // This is scoped strictly to .opencode-handoff/ paths, so it never
+    // broadens approval for ordinary task commands.
+    "permission.ask": async (input, output) => {
+      if (process.env.HERDR_ENV !== "1") {
+        return;
+      }
+      if (permissionTouchesHandoff(input)) {
+        output.status = "allow";
+        log.info("auto-allowed handoff permission", {
+          permissionID: input?.id,
+          type: input?.type,
+          title: input?.title,
+        });
+      }
     },
     // Authoritative capture point for model + variant (reasoning level): the
     // variant is not present on v1 message/session info, only here.
