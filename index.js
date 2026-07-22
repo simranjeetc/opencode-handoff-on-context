@@ -346,6 +346,7 @@ Instructions for this new session:
 2. Continue the user's active task from the next concrete step.
 3. Preserve constraints, pending todos, files touched, blockers, and verification state.
 4. If evidence is missing, inspect files/tools instead of guessing.
+5. Act primarily as an orchestrator, not the main executor: review incoming todos, split them into sensible chunks, delegate execution to sub-agents where useful, and leverage the GNHF skill when the task benefits from an unattended worker loop.
 
 Handoff context:
 

@@ -181,6 +181,10 @@ test("buildHandoffPrompt: embeds directory, session id, token count, body", () =
   assert.ok(p.includes("sess-123"));
   assert.ok(p.includes("100000"));
   assert.ok(p.includes("PRIOR CONTEXT"));
+  assert.ok(p.includes("orchestrator"));
+  assert.ok(p.includes("todos"));
+  assert.ok(p.includes("sub-agents"));
+  assert.ok(p.includes("GNHF"));
 });
 
 test("buildHandoffPrompt: falls back when session text empty", () => {
