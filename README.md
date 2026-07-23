@@ -46,6 +46,25 @@ Without these, it either no-ops or fails to complete the handoff.
 
 Copy `index.js` into `~/.config/opencode/plugins/` (global) or `.opencode/plugins/` (project).
 
+### Orchestrator agent (recommended)
+
+By default each handoff session is launched with `--agent orchestrator`. This agent
+enforces orchestrator-first behavior structurally — its `edit`/`write` tools are
+denied, so the model **cannot** implement work itself and must delegate to
+sub-agents via the `task` tool. This is far more robust than prompt instructions,
+which the model can skim past; the constraint is re-asserted every turn and carried
+across every handoff hop.
+
+Install the agent by copying it into your OpenCode agent directory:
+
+```
+cp agent/orchestrator.md ~/.config/opencode/agent/
+```
+
+Set `OPENCODE_HANDOFF_AGENT` to launch a different agent, or `OPENCODE_HANDOFF_AGENT=""`
+to disable and fall back to the default agent.
+
+
 ## Configuration
 
 All configuration is via environment variables.
@@ -59,6 +78,7 @@ All configuration is via environment variables.
 | `OPENCODE_HANDOFF_SPLIT_DIRECTION` | `down` | Herdr pane split direction. |
 | `OPENCODE_HANDOFF_SPLIT_RATIO` | `0.5` | Herdr pane split ratio. |
 | `OPENCODE_HANDOFF_COMMAND` | `opencode` | Command used to launch the new session. |
+| `OPENCODE_HANDOFF_AGENT` | `orchestrator` | Agent to launch the handoff session as (`--agent`). Empty string disables the flag. |
 | `OPENCODE_HANDOFF_CONFIRM_TIMEOUT_MS` | `30000` | How long to wait for the new pane to report `working`. |
 | `OPENCODE_HANDOFF_FILE_TTL_MS` | `3600000` | TTL for sweeping stale handoff files. |
 | `OPENCODE_HANDOFF_LOG` | `~/.config/opencode/logs/handoff-on-context.log` | Log file path. |

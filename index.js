@@ -341,12 +341,14 @@ ${directory}
 Previous OpenCode session ID:
 ${sessionID}
 
-Instructions for this new session:
+Operating mode:
+This session runs as the orchestrator agent — its system prompt and permissions are authoritative and enforce orchestrator-first behavior (plan, decompose, delegate to sub-agents; direct file edits are disabled). Follow that agent contract. In short: rebuild the todos, split the remaining work into chunks, and delegate them to sub-agents (run independent ones in parallel), using the GNHF skill for long unattended stretches.
+
+Additional instructions:
 1. Treat the handoff below as authoritative context.
-2. Continue the user's active task from the next concrete step.
-3. Preserve constraints, pending todos, files touched, blockers, and verification state.
-4. If evidence is missing, inspect files/tools instead of guessing.
-5. Act primarily as an orchestrator, not the main executor: review incoming todos, split them into sensible chunks, delegate execution to sub-agents where useful, and leverage the GNHF skill when the task benefits from an unattended worker loop.
+2. Preserve constraints, pending todos, files touched, blockers, and verification state.
+3. If evidence is missing, delegate inspection to a sub-agent instead of guessing.
+4. Do not ask the user to copy anything from the old session; continue autonomously from the next concrete step.
 
 Handoff context:
 
@@ -435,9 +437,11 @@ export async function startHandoff({ $, directory, sessionID, prompt, model, aut
   const command = env.OPENCODE_HANDOFF_COMMAND || "opencode";
   // Tiny pointer prompt: the new session reads the temp file for full context.
   const pointer =
-    `Automatic context handoff. Read the file ${handoffFile} — it is your`
-    + ` authoritative context for this task. Continue the work from the next`
-    + ` concrete step. Once you have read and internalized it, delete that file.`;
+    `Automatic context handoff. You are running as the orchestrator agent.`
+    + ` Read the file ${handoffFile} — it is your authoritative context for this`
+    + ` task. Rebuild the todo list, decompose the remaining work, and delegate`
+    + ` chunks to sub-agents per your agent contract rather than doing it all`
+    + ` yourself. Once you have read and internalized it, delete that file.`;
 
   // Reuse the previous session's model and auto-approve permission state.
   // Unknown values are omitted so OpenCode falls back to its own defaults.
@@ -449,6 +453,17 @@ export async function startHandoff({ $, directory, sessionID, prompt, model, aut
   const parts = [command];
   if (model?.providerID && model?.modelID) {
     parts.push("--model", `${model.providerID}/${model.modelID}`);
+  }
+  // Launch the handoff session as a dedicated agent (default: orchestrator).
+  // The agent's system prompt + permissions enforce orchestrator-first
+  // behavior every turn — far more robust than relying on prompt prose, which
+  // the model can skim past. Set OPENCODE_HANDOFF_AGENT="" to disable and fall
+  // back to whatever the default agent is.
+  const agentName = env.OPENCODE_HANDOFF_AGENT === undefined
+    ? "orchestrator"
+    : env.OPENCODE_HANDOFF_AGENT;
+  if (agentName) {
+    parts.push("--agent", agentName);
   }
   if (auto) {
     parts.push("--auto");

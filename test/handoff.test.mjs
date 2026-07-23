@@ -268,6 +268,7 @@ test("startHandoff: happy path splits, runs opencode, confirms, closes old pane"
   assert.ok(joined.includes("--auto"), "passes --auto when auto");
   assert.ok(joined.includes("OPENCODE_HANDOFF_IS_AUTO=1"), "stamps sticky marker");
   assert.ok(joined.includes("--model") && joined.includes("github-copilot/claude"), "passes model");
+  assert.ok(joined.includes("--agent") && joined.includes("orchestrator"), "launches the orchestrator agent by default");
   assert.ok(joined.includes("herdr pane close pane-old"), "closes old pane after confirm");
 
   assert.deepEqual(
@@ -314,6 +315,32 @@ test("startHandoff: keeps old pane open when new pane never confirms working", a
 
   assert.equal(result.oldPaneClosed, false);
   assert.ok(!calls.some((c) => c.includes("herdr pane close")), "does NOT close old pane on failed confirm");
+});
+
+test("startHandoff: OPENCODE_HANDOFF_AGENT overrides and empty string disables the agent flag", async () => {
+  // Custom agent name is passed through.
+  {
+    const { $, calls } = makeFake$({ waitExit: 0 });
+    const { fs } = makeFakeFs();
+    await startHandoff({
+      $, directory: "/d", sessionID: "s", prompt: "B", model: undefined, auto: false,
+      env: { HERDR_PANE_ID: "pane-old", OPENCODE_HANDOFF_AGENT: "custom-agent" }, fs,
+    });
+    const runCmd = calls.find((c) => c.includes("herdr pane run"));
+    assert.ok(runCmd.includes("--agent") && runCmd.includes("custom-agent"), "passes the overridden agent");
+    assert.ok(!runCmd.includes("--agent") || !/--agent'? 'orchestrator/.test(runCmd), "does not launch the default orchestrator agent when overridden");
+  }
+  // Empty string disables the --agent flag entirely.
+  {
+    const { $, calls } = makeFake$({ waitExit: 0 });
+    const { fs } = makeFakeFs();
+    await startHandoff({
+      $, directory: "/d", sessionID: "s", prompt: "B", model: undefined, auto: false,
+      env: { HERDR_PANE_ID: "pane-old", OPENCODE_HANDOFF_AGENT: "" }, fs,
+    });
+    const runCmd = calls.find((c) => c.includes("herdr pane run"));
+    assert.ok(!runCmd.includes("--agent"), "omits --agent when disabled via empty string");
+  }
 });
 
 test("startHandoff: throws when HERDR_PANE_ID is missing", async () => {

@@ -10,6 +10,7 @@
   },
   "files": [
     "index.js",
+    "agent/orchestrator.md",
     "README.md",
     "LICENSE"
   ],
