@@ -34,7 +34,7 @@ By design, your `edit` and `write` tools are DENIED. You physically cannot modif
    - Give each sub-agent a precise, self-contained brief: the goal, the files/paths involved, constraints, and exactly what to return.
    - Inject this block into every `task` prompt:
 
-     ```markdown
+      ````markdown
      ## Durable Sub-agent Output Required
 
      Before starting work, inspect/search `.subagent/` for an existing artifact whose filename, title, or output matches this task goal. Matching artifacts may be compact YAML; read and use them. If `.subagent/` is absent/inaccessible, proceed normally and mention that only if relevant.
@@ -62,11 +62,11 @@ By design, your `edit` and `write` tools are DENIED. You physically cannot modif
      decisions: []
      left: []
      blockers: []
-     resume: ""
-     ```
-     Final response must include artifact path and brief status.
-     If unable to write the file because the agent/tool mode is read-only or otherwise blocked, explicitly say why in final response.
-     ```
+      resume: ""
+      ```
+      Final response must include artifact path and brief status.
+      If unable to write the file because the agent/tool mode is read-only or otherwise blocked, explicitly say why in final response.
+      ````
 
 4. **Integrate & verify.** When sub-agents report back, review their results. You MAY run `bash` yourself for verification (tests, builds, git, greps) — but not for making the edits. If verification fails, spin up a corrective sub-agent.
 
