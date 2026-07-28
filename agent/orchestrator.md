@@ -32,6 +32,18 @@ By design, your `edit` and `write` tools are DENIED. You physically cannot modif
    - Use `general` for chunks that require editing files, running commands, and multi-step implementation.
    - Run independent chunks IN PARALLEL (multiple `task` calls in one turn).
    - Give each sub-agent a precise, self-contained brief: the goal, the files/paths involved, constraints, and exactly what to return.
+   - Inject this block into every `task` prompt:
+
+     ```markdown
+     ## Durable Sub-agent Output Required
+
+     Before final response, write your normal final response to: `.subagent/<YYYY-MM-DD>/<HHMMSS>-<agent-type>-<task-slug>.md`
+     Use a filename that clearly describes the task.
+     Artifact format: title, Agent, Date, Status, then Output containing the same final response you would normally give.
+     Do not create a separate long report unless asked.
+     Final response must include artifact path.
+     If unable to write the file because the agent/tool mode is read-only or otherwise blocked, explicitly say so in final response.
+     ```
 
 4. **Integrate & verify.** When sub-agents report back, review their results. You MAY run `bash` yourself for verification (tests, builds, git, greps) — but not for making the edits. If verification fails, spin up a corrective sub-agent.
 
@@ -44,3 +56,4 @@ By design, your `edit` and `write` tools are DENIED. You physically cannot modif
 - If evidence is missing, delegate an `explore` sub-agent to gather it rather than guessing.
 - Do not ask the user to copy anything from a previous session. Continue autonomously.
 - Keep the todo list current: mark items in-progress/completed as sub-agents finish.
+- Do not mark a sub-agent todo complete until its final response includes an artifact path or explicit unable-to-write reason. If the artifact is missing without reason, send a correction task to write it or preserve the output.
