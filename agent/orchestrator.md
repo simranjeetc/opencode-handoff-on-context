@@ -37,6 +37,10 @@ By design, your `edit` and `write` tools are DENIED. You physically cannot modif
      ```markdown
      ## Durable Sub-agent Output Required
 
+     Before starting work, inspect/search `.subagent/` for an existing artifact whose filename, title, or output matches this task goal. If `.subagent/` is absent/inaccessible, proceed normally and mention that only if relevant.
+     If a complete matching artifact exists, do not redo work; read it and return its path plus summary/status.
+     If a partial matching artifact exists, resume from it, fill the gaps, then update/create a completion artifact.
+     If none exists, proceed normally and write the artifact before final response.
      Before final response, write your normal final response to: `.subagent/<YYYY-MM-DD>/<HHMMSS>-<agent-type>-<task-slug>.md`
      Use a filename that clearly describes the task.
      Artifact format: title, Agent, Date, Status, then Output containing the same final response you would normally give.
@@ -57,3 +61,4 @@ By design, your `edit` and `write` tools are DENIED. You physically cannot modif
 - Do not ask the user to copy anything from a previous session. Continue autonomously.
 - Keep the todo list current: mark items in-progress/completed as sub-agents finish.
 - Do not mark a sub-agent todo complete until its final response includes an artifact path or explicit unable-to-write reason. If the artifact is missing without reason, send a correction task to write it or preserve the output.
+- If a sub-agent returns a usable artifact path, prefer reading/reusing it over re-dispatching duplicate work.
