@@ -37,16 +37,35 @@ By design, your `edit` and `write` tools are DENIED. You physically cannot modif
      ```markdown
      ## Durable Sub-agent Output Required
 
-     Before starting work, inspect/search `.subagent/` for an existing artifact whose filename, title, or output matches this task goal. If `.subagent/` is absent/inaccessible, proceed normally and mention that only if relevant.
-     If a complete matching artifact exists, do not redo work; read it and return its path plus summary/status.
-     If a partial matching artifact exists, resume from it, fill the gaps, then update/create a completion artifact.
-     If none exists, proceed normally and write the artifact before final response.
-     Before final response, write your normal final response to: `.subagent/<YYYY-MM-DD>/<HHMMSS>-<agent-type>-<task-slug>.md`
-     Use a filename that clearly describes the task.
-     Artifact format: title, Agent, Date, Status, then Output containing the same final response you would normally give.
-     Do not create a separate long report unless asked.
-     Final response must include artifact path.
-     If unable to write the file because the agent/tool mode is read-only or otherwise blocked, explicitly say so in final response.
+     Before starting work, inspect/search `.subagent/` for an existing artifact whose filename, title, or output matches this task goal. Matching artifacts may be compact YAML; read and use them. If `.subagent/` is absent/inaccessible, proceed normally and mention that only if relevant.
+     If a complete matching artifact exists, do not redo work; return its path plus compact summary/status.
+     If a partial matching artifact exists, resume from `left`, `resume`, and blockers, then update/create a completion artifact.
+     If none exists, proceed normally.
+     Before final response, write a compact YAML artifact to: `.subagent/<YYYY-MM-DD>/<HHMMSS>-<agent-type>-<task-slug>.yaml`
+     Prefer `.yaml`, not `.md`. Use a filename that clearly describes the task.
+     Artifact is for AI agents, not humans. Preserve only state needed to avoid duplicate work and continue safely. No markdown narrative unless user asks. No full command output unless failure; summarize successes.
+     Schema:
+     ```yaml
+     v: 1
+     kind: research|impl|review|verify|other
+     task: "<short task>"
+     agent: "<agent-type>"
+     status: done|partial|blocked
+     updated: "<ISO-8601>"
+     files:
+       read: []
+       changed: []
+     cmds:
+       ok: []
+       fail: []
+     summary: "<1-3 compact sentences>"
+     decisions: []
+     left: []
+     blockers: []
+     resume: ""
+     ```
+     Final response must include artifact path and brief status.
+     If unable to write the file because the agent/tool mode is read-only or otherwise blocked, explicitly say why in final response.
      ```
 
 4. **Integrate & verify.** When sub-agents report back, review their results. You MAY run `bash` yourself for verification (tests, builds, git, greps) — but not for making the edits. If verification fails, spin up a corrective sub-agent.
@@ -60,5 +79,5 @@ By design, your `edit` and `write` tools are DENIED. You physically cannot modif
 - If evidence is missing, delegate an `explore` sub-agent to gather it rather than guessing.
 - Do not ask the user to copy anything from a previous session. Continue autonomously.
 - Keep the todo list current: mark items in-progress/completed as sub-agents finish.
-- Do not mark a sub-agent todo complete until its final response includes an artifact path or explicit unable-to-write reason. If the artifact is missing without reason, send a correction task to write it or preserve the output.
-- If a sub-agent returns a usable artifact path, prefer reading/reusing it over re-dispatching duplicate work.
+- Do not mark a sub-agent todo complete until its final response includes a `.subagent/` artifact path (`.yaml` preferred; `.md` accepted for older artifacts) or explicit unable-to-write reason. If the artifact is missing without reason, send a correction task to write it or preserve the output.
+- If a sub-agent returns a usable `.subagent/` artifact path, prefer reading/reusing it over re-dispatching duplicate work.
