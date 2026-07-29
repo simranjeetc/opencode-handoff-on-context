@@ -16,7 +16,7 @@ The new session continues the task from the next concrete step — no manual cop
 This plugin is **not generic**. It only does anything inside Herdr and needs its CLI:
 
 - Runs **only** when `HERDR_ENV=1` (no-ops otherwise).
-- `herdr` CLI on `PATH` — uses `pane split`, `pane run`, `pane close`, and `wait agent-status`.
+- `herdr` CLI on `PATH` — uses `pane split`, `pane run`, `pane close`, and `agent wait`.
 - Relies on a companion `herdr-agent-state` plugin that reports OpenCode agent status (`working`) so the handoff can be confirmed before the old pane is torn down.
 - `opencode` CLI on `PATH` (or set `OPENCODE_HANDOFF_COMMAND`).
 

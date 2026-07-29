@@ -490,7 +490,7 @@ export async function startHandoff({ $, directory, sessionID, prompt, model, aut
   // running. If it never flips to working we keep the old pane alive so nothing
   // is lost.
   const confirmTimeout = numberFromEnv("OPENCODE_HANDOFF_CONFIRM_TIMEOUT_MS", 30_000);
-  const started = await $`herdr wait agent-status ${newPaneID} --status ${"working"} --timeout ${String(confirmTimeout)}`.nothrow();
+  const started = await $`herdr agent wait ${newPaneID} --until ${"working"} --timeout ${String(confirmTimeout)}`.nothrow();
   const confirmed = started?.exitCode === 0;
   if (confirmed) {
     log.info("new pane confirmed processing handoff", { newPaneID });

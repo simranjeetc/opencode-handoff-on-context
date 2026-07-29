@@ -221,7 +221,7 @@ function makeFake$({ splitPaneID = "pane-new", waitExit = 0 } = {}) {
       },
       quiet: () => chain,
       nothrow: () => chain,
-      then: (resolve) => resolve({ exitCode: cmd.includes("wait agent-status") ? waitExit : 0 }),
+      then: (resolve) => resolve({ exitCode: cmd.includes("agent wait") ? waitExit : 0 }),
     };
     return chain;
   };
@@ -299,7 +299,7 @@ test("startHandoff: non-auto omits --auto flag and sticky stamp", async () => {
 });
 
 test("startHandoff: keeps old pane open when new pane never confirms working", async () => {
-  const { $, calls } = makeFake$({ waitExit: 1 }); // wait agent-status fails
+  const { $, calls } = makeFake$({ waitExit: 1 }); // agent wait fails
   const { fs } = makeFakeFs();
 
   const result = await startHandoff({
