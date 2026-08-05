@@ -44,7 +44,15 @@ Without these, it either no-ops or fails to complete the handoff.
 
 ### Local file
 
-Copy `index.js` into `~/.config/opencode/plugins/` (global) or `.opencode/plugins/` (project).
+Symlink (or copy) `index.js` into `~/.config/opencode/plugins/` (global) or
+`.opencode/plugins/` (project). `index.js` re-exports the plugin from `lib.js`,
+so keep both files together — do not copy `index.js` alone.
+
+**Module layout:** `index.js` is the entry point and exports ONLY the plugin as
+its default export. This is deliberate: OpenCode's plugin loader invokes every
+function export as a plugin factory, so any helper exported from the entry
+point gets called with `PluginInput` and throws on boot. All helpers
+(`startHandoff`, `resolveAuto`, …) live in `lib.js`, which tests import.
 
 ### Orchestrator agent (recommended)
 
@@ -99,7 +107,7 @@ For overnight or looped runs the plugin guarantees the handoff never stalls on a
 
 ## Development
 
-Tests use Node's built-in runner (`node --test`) — zero dependencies. They import the shipped `index.js` directly, so a behavior drift fails a test.
+Tests use Node's built-in runner (`node --test`) — zero dependencies. They import the shipped `lib.js` directly (plus an export-surface guard on `index.js`), so a behavior drift fails a test.
 
 ```sh
 npm test

@@ -1,11 +1,14 @@
-// Regression tests for the handoff plugin. These import the REAL module
-// (../index.js) — not a copy — so a behavior drift in the shipped code fails a
-// test. Uses Node's built-in test runner (node --test), zero dependencies.
+// Regression tests for the handoff plugin. These import the REAL implementation
+// (../lib.js) — not a copy — so a behavior drift in the shipped code fails a
+// test. The plugin entry (../index.js) is only exercised via the export-surface
+// test below. Uses Node's built-in test runner (node --test), zero dependencies.
 //
 // Coverage is risk-based (TEA):
 //   P0 — unattended-safety decision logic: resolveAuto, permissionTouchesHandoff
 //   P1 — pure helpers: shellQuote, truncateMiddle, getTokenCount, buildHandoffPrompt
-//   P2 — orchestration seam: startHandoff with an injected fake $ and fake fs
+//   P2 — orchestration seam: startHandoff + confirmNewPaneWorking with an
+//        injected fake $ and fake fs
+//   P2 — export surface: index.js must export ONLY the plugin (default)
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -20,7 +23,8 @@ import {
   buildHandoffPrompt,
   textFromMessages,
   startHandoff,
-} from "../index.js";
+  confirmNewPaneWorking,
+} from "../lib.js";
 
 // ---------------------------------------------------------------------------
 // P0: resolveAuto precedence  (env override > sticky-self > inference)
@@ -199,8 +203,15 @@ test("buildHandoffPrompt: falls back when session text empty", () => {
 // Build a fake tagged-template `$` that records the composed command string and
 // returns canned results per herdr subcommand. Mirrors the .json()/.quiet()/
 // .nothrow() surface the real code calls.
-function makeFake$({ splitPaneID = "pane-new", waitExit = 0 } = {}) {
+//
+// `agent wait` results come from `waitExits`: each successive wait consumes the
+// next entry (the last one repeats once exhausted), so tests can simulate the
+// agent_not_found-then-working race. `waitStdout` is attached to wait results
+// (e.g. herdr's agent_not_found JSON) to exercise failure-detail logging.
+function makeFake$({ splitPaneID = "pane-new", waitExit = 0, waitExits, waitStdout = "" } = {}) {
   const calls = [];
+  const exits = waitExits ?? [waitExit];
+  let waitCalls = 0;
   function compose(strings, values) {
     let s = "";
     strings.forEach((part, i) => {
@@ -212,6 +223,8 @@ function makeFake$({ splitPaneID = "pane-new", waitExit = 0 } = {}) {
   const $ = (strings, ...values) => {
     const cmd = compose(strings, values);
     calls.push(cmd);
+    const isWait = cmd.includes("agent wait");
+    const exitCode = isWait ? exits[Math.min(waitCalls++, exits.length - 1)] : 0;
     const chain = {
       json: async () => {
         if (cmd.includes("herdr pane split")) {
@@ -221,12 +234,22 @@ function makeFake$({ splitPaneID = "pane-new", waitExit = 0 } = {}) {
       },
       quiet: () => chain,
       nothrow: () => chain,
-      then: (resolve) => resolve({ exitCode: cmd.includes("agent wait") ? waitExit : 0 }),
+      then: (resolve) => resolve({
+        exitCode,
+        stdout: isWait ? waitStdout : "",
+        stderr: "",
+      }),
     };
     return chain;
   };
   return { $, calls };
 }
+
+// Instant sleep so confirm-retry tests don't burn wall-clock time.
+const noSleep = async () => {};
+// Small confirm timeout so always-fail tests finish fast (injected env wins
+// over process.env inside startHandoff).
+const FAST_CONFIRM_ENV = { OPENCODE_HANDOFF_CONFIRM_TIMEOUT_MS: "250" };
 
 function makeFakeFs() {
   const writes = [];
@@ -299,7 +322,10 @@ test("startHandoff: non-auto omits --auto flag and sticky stamp", async () => {
 });
 
 test("startHandoff: keeps old pane open when new pane never confirms working", async () => {
-  const { $, calls } = makeFake$({ waitExit: 1 }); // agent wait fails
+  const { $, calls } = makeFake$({
+    waitExit: 1, // agent wait always fails
+    waitStdout: '{"error":{"code":"agent_not_found","message":"agent target pane-new not found"}}',
+  });
   const { fs } = makeFakeFs();
 
   const result = await startHandoff({
@@ -309,12 +335,74 @@ test("startHandoff: keeps old pane open when new pane never confirms working", a
     prompt: "B",
     model: undefined,
     auto: true,
-    env: { HERDR_PANE_ID: "pane-old" },
+    env: { HERDR_PANE_ID: "pane-old", ...FAST_CONFIRM_ENV },
     fs,
+    sleep: noSleep,
   });
 
   assert.equal(result.oldPaneClosed, false);
   assert.ok(!calls.some((c) => c.includes("herdr pane close")), "does NOT close old pane on failed confirm");
+  const waits = calls.filter((c) => c.includes("agent wait"));
+  assert.ok(waits.length > 1, "retries the wait until the confirm deadline");
+});
+
+test("startHandoff: agent_not_found race — retries until agent registers, then closes old pane", async () => {
+  // First two waits fail fast (agent not registered yet), third succeeds —
+  // the exact race observed live: wait aborts in ~ms before herdr detects the
+  // new pane's opencode process (~1.4s later).
+  const { $, calls } = makeFake$({
+    waitExits: [1, 1, 0],
+    waitStdout: '{"error":{"code":"agent_not_found"}}',
+  });
+  const { fs } = makeFakeFs();
+
+  const result = await startHandoff({
+    $,
+    directory: "/d",
+    sessionID: "s",
+    prompt: "B",
+    model: undefined,
+    auto: true,
+    env: { HERDR_PANE_ID: "pane-old", ...FAST_CONFIRM_ENV },
+    fs,
+    sleep: noSleep,
+  });
+
+  assert.equal(result.oldPaneClosed, true, "confirm eventually succeeds via retry");
+  assert.ok(calls.some((c) => c.includes("herdr pane close pane-old")), "closes old pane after retry succeeds");
+  const waits = calls.filter((c) => c.includes("agent wait"));
+  assert.equal(waits.length, 3, "made exactly three wait attempts");
+});
+
+test("confirmNewPaneWorking: ok on first success; not-ok with detail after deadline", async () => {
+  {
+    const { $ } = makeFake$({ waitExits: [0] });
+    const r = await confirmNewPaneWorking($, "pane-new", 1000, noSleep);
+    assert.equal(r.ok, true);
+    assert.equal(r.exitCode, 0);
+  }
+  {
+    const { $, calls } = makeFake$({ waitExits: [1], waitStdout: "agent_not_found" });
+    const r = await confirmNewPaneWorking($, "pane-new", 250, noSleep);
+    assert.equal(r.ok, false);
+    assert.equal(r.exitCode, 1);
+    assert.ok(r.text.includes("agent_not_found"), "returns failure detail text");
+    assert.ok(calls.filter((c) => c.includes("agent wait")).length > 1, "retried until deadline");
+  }
+});
+
+test("startHandoff: throws a clear error when prompt is not a string", async () => {
+  const { $, calls } = makeFake$();
+  const { fs, writes } = makeFakeFs();
+  await assert.rejects(
+    () => startHandoff({
+      $, directory: "/d", sessionID: "s", prompt: undefined, auto: false,
+      env: { HERDR_PANE_ID: "pane-old" }, fs,
+    }),
+    /handoff prompt must be a string, got undefined/,
+  );
+  assert.equal(writes.length, 0, "no handoff file written");
+  assert.equal(calls.length, 0, "no herdr commands issued");
 });
 
 test("startHandoff: OPENCODE_HANDOFF_AGENT overrides and empty string disables the agent flag", async () => {
@@ -350,4 +438,23 @@ test("startHandoff: throws when HERDR_PANE_ID is missing", async () => {
     () => startHandoff({ $, directory: "/d", sessionID: "s", prompt: "B", auto: false, env: {}, fs }),
     /HERDR_PANE_ID is not set/,
   );
+});
+
+// ---------------------------------------------------------------------------
+// P2: plugin entry export surface
+// OpenCode's loader invokes EVERY function export as a plugin factory. If any
+// helper leaks into index.js exports, boot logs a load TypeError and the
+// plugin only partially loads. Guard: exactly one function export (default).
+// ---------------------------------------------------------------------------
+
+test("index.js exports ONLY the plugin factory as default", async () => {
+  const mod = await import("../index.js");
+  const fnExports = Object.entries(mod)
+    .filter(([, v]) => typeof v === "function")
+    .map(([k]) => k);
+  assert.deepEqual(fnExports, ["default"], "index.js must not export helpers (OpenCode calls every function export as a factory)");
+  assert.equal(typeof mod.default, "function");
+  // And the plugin is the real one from lib.js.
+  const lib = await import("../lib.js");
+  assert.equal(mod.default, lib.HandoffOnContextPlugin);
 });
