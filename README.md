@@ -1,5 +1,9 @@
 # opencode-handoff-on-context
 
+> **Archived — no longer maintained.** This plugin targets **OpenCode v1**.
+> OpenCode **v2** reworked the plugin/agent APIs it depends on, so it does not
+> work against v2 and is kept here for reference only.
+
 An [OpenCode](https://opencode.ai) plugin that automatically **hands off a session to a fresh one before the context window fills up** — while running inside [Herdr](https://github.com/anomalyco/opencode).
 
 When the active (root) session crosses a token threshold, the plugin:
